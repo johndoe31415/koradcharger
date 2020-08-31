@@ -1,0 +1,98 @@
+#!/usr/bin/python3
+#	koradcharger - Korad KA3005-based Li-Ion CC/CV charger
+#	Copyright (C) 2020-2020 Johannes Bauer
+#
+#	This file is part of koradcharger.
+#
+#	koradcharger is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	koradcharger is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with koradcharger; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+import sys
+import korad
+import time
+import json
+from FriendlyArgumentParser import FriendlyArgumentParser
+
+parser = FriendlyArgumentParser(description = "Korad power supply Li-Ion charging application.")
+parser.add_argument("--charge-voltage", metavar = "volts", type = float, default = 4.2, help = "Specifies charging voltage. Defaults to %(default).2f V.")
+parser.add_argument("--charge-current", metavar = "amps", type = float, default = 1.4, help = "Specifies charging current. Defaults to %(default).2f A.")
+parser.add_argument("--cutoff-current", metavar = "amps", type = float, default = 0.06, help = "Specifies charging cutoff current. Defaults to %(default).2f A.")
+parser.add_argument("--cutoff-time", metavar = "hours", type = float, default = 3, help = "Specifies charging cutoff time in hours. Defaults to %(default).1f hours.")
+parser.add_argument("-l", "--logfile", metavar = "filename", help = "Specifies file to log into. By default, logging is disabled.")
+parser.add_argument("-v", "--verbose", action = "count", default = 0, help = "Increases verbosity. Can be specified multiple times to increase.")
+parser.add_argument("device", metavar = "device", help = "Device to connect to.")
+args = parser.parse_args(sys.argv[1:])
+
+class Logger():
+	def __init__(self, logfile):
+		self._logfile = logfile
+		if self._logfile is None:
+			self._f = None
+		else:
+			self._f = open(self._logfile, "a")
+		self._last_flush = time.time()
+
+	def entry(self, data):
+		now = time.time()
+		entry = {
+			"t":		now,
+			"data":		data,
+		}
+		print(data)
+		if self._f is not None:
+			print(json.dumps(entry), file = self._f)
+			if now - self._last_flush > 30:
+				self._f.flush()
+				self._last_flush = now
+
+	def close(self):
+		if self._f is not None:
+			self._f.close()
+
+with korad.KoradConnection(args.device) as conn:
+	try:
+		conn.output(False)
+		conn.set_v(args.charge_voltage)
+		conn.set_i(args.charge_current)
+		status = conn.status()
+		assert(abs(status["ch1"]["vset"] - args.charge_voltage) < 1e-3)
+		assert(abs(status["ch1"]["iset"] - args.charge_current) < 1e-3)
+
+		conn.output(True)
+		log = Logger(args.logfile)
+		t0 = time.time()
+		current_cutoff_counter = 0
+		while True:
+			t = time.time()
+			tdiff_hrs = (t - t0) / 3600
+			if tdiff_hrs >= args.cutoff_time:
+				print("Cutting off because of time.")
+				break
+
+			status = conn.status()
+			log.entry(status)
+			if status["ch1"]["iout"] < args.cutoff_current:
+				current_cutoff_counter += 1
+			else:
+				current_cutoff_counter = 0
+			if current_cutoff_counter > 10:
+				print("Cutting off because of current.")
+				break
+			time.sleep(1)
+		log.close()
+	finally:
+		conn.output(False)
+		log.close()
