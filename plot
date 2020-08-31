@@ -31,7 +31,7 @@ parser.add_argument("-o", "--output", metavar = "pngfile", default = "charging_g
 parser.add_argument("logfile", metavar = "logfile", help = "A charging log.")
 args = parser.parse_args(sys.argv[1:])
 
-gpd = GnuPlotDiagram(title = "Charging Diagram", xtitle = "Time", ytitle = "Current / A", ytitle2 = "Voltage / V" if (not args.mah) else "Charge / mAh")
+gpd = GnuPlotDiagram(title = "Charging Diagram", xtitle = "Time / hh:mm", ytitle = "Current / A", ytitle2 = "Voltage / V" if (not args.mah) else "Charge / mAh")
 data_v = [ ]
 data_i = [ ]
 data_mah = [ ]
@@ -58,4 +58,5 @@ with open(args.logfile) as f:
 	else:
 		gpd.add_dataset(GnuPlotDataset(data_mah, title = "Charge in mAh", line_width = 2, axis = 2))
 
+gpd.make_timeplot("%H:%M")
 gpd.write_rendered(args.output)
