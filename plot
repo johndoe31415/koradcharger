@@ -26,37 +26,72 @@ from FriendlyArgumentParser import FriendlyArgumentParser
 from GnuPlot import GnuPlotDiagram, GnuPlotDataset
 
 parser = FriendlyArgumentParser(description = "Li-Ion charging log plotter.")
-parser.add_argument("-m", "--mah", action = "store_true", help = "Instead of voltage, plot the mAh that have been charged by integrating the charging current.")
+parser.add_argument("-a", "--axis1", choices = [ "voltage", "current", "mah" ], default = "current", help = "First axis content. Can be one of %(choices)s, defaults to %(default)s.")
+parser.add_argument("-b", "--axis2", choices = [ "voltage", "current", "mah", "none" ], default = "mah", help = "Second axis content. Can be one of %(choices)s, defaults to %(default)s.")
 parser.add_argument("-o", "--output", metavar = "pngfile", default = "charging_graph.png", help = "Output file to write to. Defaults to %(default)s.")
-parser.add_argument("logfile", metavar = "logfile", help = "A charging log.")
+parser.add_argument("logfile", nargs = "+", metavar = "logfile", help = "A charging log or logs that should be plotted.")
 args = parser.parse_args(sys.argv[1:])
 
-gpd = GnuPlotDiagram(title = "Charging Diagram", xtitle = "Time / hh:mm", ytitle = "Current / A", ytitle2 = "Voltage / V" if (not args.mah) else "Charge / mAh")
-data_v = [ ]
-data_i = [ ]
-data_mah = [ ]
-with open(args.logfile) as f:
-	t0 = None
-	tlast = None
-	mah = 0
-	for line in f:
-		data = json.loads(line)
-		if t0 is None:
-			t0 = data["t"]
-		tdiff = data["t"] - t0
-		data_v.append((tdiff, data["data"]["ch1"]["vout"]))
-		data_i.append((tdiff, data["data"]["ch1"]["iout"]))
-		if (tlast is not None) and (data["t"] - tlast) < 5:
-			delta_t = data["t"] - tlast
-			mah += 1000 * data["data"]["ch1"]["iout"] * delta_t / 3600
-			data_mah.append((tdiff, mah))
-		tlast = data["t"]
+class Plotter():
+	def __init__(self, args):
+		self._args = args
+		self._gpd = None
 
-	gpd.add_dataset(GnuPlotDataset(data_i, title = "Current", line_width = 2))
-	if not args.mah:
-		gpd.add_dataset(GnuPlotDataset(data_v, title = "Voltage", line_width = 2, axis = 2))
-	else:
-		gpd.add_dataset(GnuPlotDataset(data_mah, title = "Charge in mAh", line_width = 2, axis = 2))
+	def _plot(self, filename, include_filename = False):
+		data_v = [ ]
+		data_i = [ ]
+		data_mah = [ ]
+		with open(filename) as f:
+			t0 = None
+			tlast = None
+			mah = 0
+			for line in f:
+				data = json.loads(line)
+				if t0 is None:
+					t0 = data["t"]
+				tdiff = data["t"] - t0
+				data_v.append((tdiff, data["data"]["ch1"]["vout"]))
+				data_i.append((tdiff, data["data"]["ch1"]["iout"]))
+				if (tlast is not None) and (data["t"] - tlast) < 5:
+					delta_t = data["t"] - tlast
+					mah += 1000 * data["data"]["ch1"]["iout"] * delta_t / 3600
+					data_mah.append((tdiff, mah))
+				tlast = data["t"]
 
-gpd.make_timeplot("%H:%M")
-gpd.write_rendered(args.output)
+			suffix = "" if (not include_filename) else (" / %s" % (filename))
+			for axis in range(2):
+				content = self._args.axis1 if (axis == 0) else self._args.axis2
+				if content == "current":
+					self._gpd.add_dataset(GnuPlotDataset(data_i, title = "Current%s" % (suffix), line_width = 2, axis = axis + 1))
+				elif content == "voltage":
+					self._gpd.add_dataset(GnuPlotDataset(data_v, title = "Voltage%s" % (suffix), line_width = 2, axis = axis + 1))
+				elif content == "mah":
+					self._gpd.add_dataset(GnuPlotDataset(data_mah, title = "Charge in mAh%s" % (suffix), line_width = 2, axis = axis + 1))
+				elif content == "none":
+					pass
+				else:
+					raise NotImplementedError(content)
+
+	def run(self):
+		data = {
+			"title": "Charging Diagram",
+			"xtitle": "Time / hh:mm",
+		}
+		axis_descriptions = {
+			"voltage":	"Voltage / V",
+			"current":	"Current / A",
+			"mah":		"Charge / mAh",
+		}
+		data["ytitle"] = axis_descriptions[self._args.axis1]
+		if self._args.axis2 != "none":
+			data["ytitle2"] = axis_descriptions[self._args.axis2]
+		self._gpd = GnuPlotDiagram(**data)
+
+		for filename in self._args.logfile:
+			self._plot(filename, include_filename = len(self._args.logfile) > 1)
+
+		self._gpd.make_timeplot("%H:%M")
+		self._gpd.write_rendered(self._args.output)
+
+plotter = Plotter(args)
+plotter.run()
