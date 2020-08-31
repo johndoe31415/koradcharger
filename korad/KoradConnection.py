@@ -40,8 +40,13 @@ class KoradConnection():
 		time.sleep(0.15)
 
 	def _txrx(self, text):
-		self._tx(text)
-		return self._rx()
+		for try_no in range(3):
+			self._tx(text)
+			response = self._rx()
+			if response != "":
+				return response
+			time.sleep(0.5)
+		raise KoradConnectionException("Could not get a response to the '%s' command." % (text))
 
 	def _get_float(self, value, char_count = None):
 		str_value = self._txrx(value + "?")
