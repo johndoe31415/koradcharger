@@ -26,8 +26,8 @@ from FriendlyArgumentParser import FriendlyArgumentParser
 from GnuPlot import GnuPlotDiagram, GnuPlotDataset
 
 parser = FriendlyArgumentParser(description = "Li-Ion charging log plotter.")
-parser.add_argument("-a", "--axis1", choices = [ "voltage", "current", "mah" ], default = "current", help = "First axis content. Can be one of %(choices)s, defaults to %(default)s.")
-parser.add_argument("-b", "--axis2", choices = [ "voltage", "current", "mah", "none" ], default = "mah", help = "Second axis content. Can be one of %(choices)s, defaults to %(default)s.")
+parser.add_argument("-a", "--axis1", choices = [ "voltage", "current", "mah", "wh" ], default = "current", help = "First axis content. Can be one of %(choices)s, defaults to %(default)s.")
+parser.add_argument("-b", "--axis2", choices = [ "voltage", "current", "mah", "wh", "none" ], default = "mah", help = "Second axis content. Can be one of %(choices)s, defaults to %(default)s.")
 parser.add_argument("-o", "--output", metavar = "pngfile", default = "charging_graph.png", help = "Output file to write to. Defaults to %(default)s.")
 parser.add_argument("logfile", nargs = "+", metavar = "logfile", help = "A charging log or logs that should be plotted.")
 args = parser.parse_args(sys.argv[1:])
@@ -41,10 +41,12 @@ class Plotter():
 		data_v = [ ]
 		data_i = [ ]
 		data_mah = [ ]
+		data_wh = [ ]
 		with open(filename) as f:
 			t0 = None
 			tlast = None
 			mah = 0
+			wh = 0
 			for line in f:
 				data = json.loads(line)
 				if t0 is None:
@@ -56,6 +58,8 @@ class Plotter():
 					delta_t = data["t"] - tlast
 					mah += 1000 * data["data"]["ch1"]["iout"] * delta_t / 3600
 					data_mah.append((tdiff, mah))
+					wh += data["data"]["ch1"]["vout"] * data["data"]["ch1"]["iout"] * delta_t / 3600
+					data_wh.append((tdiff, wh))
 				tlast = data["t"]
 
 			suffix = "" if (not include_filename) else (" / %s" % (filename))
@@ -67,6 +71,8 @@ class Plotter():
 					self._gpd.add_dataset(GnuPlotDataset(data_v, title = "Voltage%s" % (suffix), line_width = 2, axis = axis + 1))
 				elif content == "mah":
 					self._gpd.add_dataset(GnuPlotDataset(data_mah, title = "Charge in mAh%s" % (suffix), line_width = 2, axis = axis + 1))
+				elif content == "wh":
+					self._gpd.add_dataset(GnuPlotDataset(data_wh, title = "Charge in Wh%s" % (suffix), line_width = 2, axis = axis + 1))
 				elif content == "none":
 					pass
 				else:
@@ -81,6 +87,7 @@ class Plotter():
 			"voltage":	"Voltage / V",
 			"current":	"Current / A",
 			"mah":		"Charge / mAh",
+			"wh":		"Charge / Wh",
 		}
 		data["ytitle"] = axis_descriptions[self._args.axis1]
 		if self._args.axis2 != "none":
